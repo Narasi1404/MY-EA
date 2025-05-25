@@ -1,0 +1,564 @@
+//+------------------------------------------------------------------+
+//|                                              Neo Scalper X9.mq5 |
+//|                              Copyright 2023, Quantum Trading Technologies |
+//|                                        AI-Powered High Frequency Trading System |
+//+------------------------------------------------------------------+
+#property copyright "Copyright 2023, Quantum Trading Technologies"
+#property link      "https://www.quantumtrading.tech"
+#property version   "4.21"
+#property description "Neo Scalper X9 - Ultra High Frequency AI-Powered Scalping System"
+
+#include <Trade\Trade.mqh>
+#include <Trade\PositionInfo.mqh>
+#include <Trade\OrderInfo.mqh>
+
+//--- Input Parameters
+input group "=== CORE SETTINGS ==="
+input ENUM_TIMEFRAMES TradingTimeframe = PERIOD_M1;        // Trading Timeframe
+input int TakeProfitPips = 8;                              // Take Profit (pips)
+input int StopLossPips = 12;                               // Stop Loss (pips)
+input double MaxSpreadPips = 1.2;                          // Max Spread (pips)
+input int MaxConcurrentTrades = 5;                         // Max Concurrent Trades
+
+input group "=== RISK MANAGEMENT ==="
+input double RiskPerTrade = 1.5;                           // Risk per Trade (%)
+input double DailyMaxLoss = 7.0;                           // Daily Max Loss (%)
+input double LotSize = 0.01;                               // Fixed Lot Size (0 = auto)
+input bool UseAutoLotSizing = true;                        // Use Auto Lot Sizing
+
+input group "=== AI CONFIGURATION ==="
+input ENUM_APPLIED_PRICE PriceApplied = PRICE_CLOSE;       // Price Applied
+input int FastMA = 5;                                      // Fast MA Period
+input int SlowMA = 21;                                     // Slow MA Period
+input int RSIPeriod = 14;                                  // RSI Period
+input int StochPeriod = 14;                                // Stochastic Period
+input double AggressivenessLevel = 7.0;                    // Aggressiveness (1-10)
+
+input group "=== ADVANCED FILTERS ==="
+input bool UseSentimentAnalysis = true;                    // Enable Sentiment Analysis
+input bool UseNewsFilter = true;                           // Enable News Event Filter
+input bool UseAdaptiveLearning = false;                    // Enable Adaptive Learning
+input int MinBarsForEntry = 3;                             // Min Bars for Entry Signal
+
+input group "=== TIME FILTERS ==="
+input bool UseTimeFilter = true;                           // Enable Time Filter
+input int StartHour = 8;                                   // Trading Start Hour
+input int EndHour = 18;                                    // Trading End Hour
+input bool AvoidNewsTime = true;                           // Avoid High Impact News
+
+//--- Global Variables
+CTrade trade;
+CPositionInfo position;
+COrderInfo order;
+
+struct TradeStats {
+    double dailyPnL;
+    int totalTrades;
+    int winningTrades;
+    int losingTrades;
+    double totalProfit;
+    double totalLoss;
+    datetime lastTradeTime;
+    double currentDrawdown;
+};
+
+TradeStats stats;
+datetime startOfDay;
+double accountStartBalance;
+double lastTickTime;
+int magicNumber = 20231205;
+
+//--- Technical Indicators
+int handleMA_Fast, handleMA_Slow, handleRSI, handleStoch;
+double ma_fast[], ma_slow[], rsi[], stoch_main[], stoch_signal[];
+
+//--- AI Neural Network Simulation Arrays
+double neuralWeights[10];
+double sentimentScore = 0.0;
+double marketVolatility = 0.0;
+double momentumStrength = 0.0;
+
+//+------------------------------------------------------------------+
+//| Expert initialization function                                   |
+//+------------------------------------------------------------------+
+int OnInit()
+{
+    Print("Neo Scalper X9 v4.2.1 - Initializing AI-Powered Trading System...");
+    
+    // Initialize trade object
+    trade.SetExpertMagicNumber(magicNumber);
+    trade.SetDeviationInPoints(10);
+    trade.SetTypeFilling(ORDER_FILLING_IOC);
+    
+    // Initialize indicators
+    handleMA_Fast = iMA(_Symbol, TradingTimeframe, FastMA, 0, MODE_EMA, PriceApplied);
+    handleMA_Slow = iMA(_Symbol, TradingTimeframe, SlowMA, 0, MODE_EMA, PriceApplied);
+    handleRSI = iRSI(_Symbol, TradingTimeframe, RSIPeriod, PriceApplied);
+    handleStoch = iStochastic(_Symbol, TradingTimeframe, StochPeriod, 3, 3, MODE_SMA, STO_LOWHIGH);
+    
+    // Check indicator handles
+    if(handleMA_Fast == INVALID_HANDLE || handleMA_Slow == INVALID_HANDLE || 
+       handleRSI == INVALID_HANDLE || handleStoch == INVALID_HANDLE) {
+        Print("Error creating indicators!");
+        return INIT_FAILED;
+    }
+    
+    // Initialize arrays
+    ArraySetAsSeries(ma_fast, true);
+    ArraySetAsSeries(ma_slow, true);
+    ArraySetAsSeries(rsi, true);
+    ArraySetAsSeries(stoch_main, true);
+    ArraySetAsSeries(stoch_signal, true);
+    
+    // Initialize neural network weights (simplified simulation)
+    InitializeNeuralNetwork();
+    
+    // Initialize stats
+    ResetDailyStats();
+    accountStartBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+    
+    // Create dashboard comment
+    UpdateDashboard();
+    
+    Print("Neo Scalper X9 initialized successfully!");
+    Print("Trading Mode: Ultra High Frequency Scalping");
+    Print("Max Concurrent Trades: ", MaxConcurrentTrades);
+    Print("Risk per Trade: ", RiskPerTrade, "%");
+    
+    return INIT_SUCCEEDED;
+}
+
+//+------------------------------------------------------------------+
+//| Expert deinitialization function                                 |
+//+------------------------------------------------------------------+
+void OnDeinit(const int reason)
+{
+    Print("Neo Scalper X9 shutting down...");
+    PrintFinalStats();
+    Comment("");
+}
+
+//+------------------------------------------------------------------+
+//| Expert tick function                                             |
+//+------------------------------------------------------------------+
+void OnTick()
+{
+    // Update market data
+    UpdateMarketData();
+    
+    // Check time filters
+    if(!IsTimeToTrade()) return;
+    
+    // Check daily loss limit
+    if(CheckDailyLossLimit()) return;
+    
+    // Update AI components
+    UpdateSentimentAnalysis();
+    UpdateMarketVolatility();
+    UpdateMomentumStrength();
+    
+    // Main trading logic
+    ProcessTradingSignals();
+    
+    // Update dashboard every 10 ticks
+    static int tickCounter = 0;
+    if(++tickCounter >= 10) {
+        UpdateDashboard();
+        tickCounter = 0;
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Initialize Neural Network Weights                               |
+//+------------------------------------------------------------------+
+void InitializeNeuralNetwork()
+{
+    MathSrand((int)TimeLocal());
+    for(int i = 0; i < 10; i++) {
+        neuralWeights[i] = (MathRand() / 32768.0) * 2.0 - 1.0; // Random between -1 and 1
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Update Market Data                                              |
+//+------------------------------------------------------------------+
+void UpdateMarketData()
+{
+    // Copy indicator data
+    CopyBuffer(handleMA_Fast, 0, 0, 3, ma_fast);
+    CopyBuffer(handleMA_Slow, 0, 0, 3, ma_slow);
+    CopyBuffer(handleRSI, 0, 0, 3, rsi);
+    CopyBuffer(handleStoch, 0, 0, 3, stoch_main);
+    CopyBuffer(handleStoch, 1, 0, 3, stoch_signal);
+    
+    // Update daily stats if new day
+    datetime current = TimeCurrent();
+    MqlDateTime dt;
+    TimeToStruct(current, dt);
+    
+    if(dt.hour == 0 && dt.min == 0) {
+        if(startOfDay != StringToTime(IntegerToString(dt.year) + "." + IntegerToString(dt.mon) + "." + IntegerToString(dt.day))) {
+            ResetDailyStats();
+        }
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Check if it's time to trade                                     |
+//+------------------------------------------------------------------+
+bool IsTimeToTrade()
+{
+    if(!UseTimeFilter) return true;
+    
+    MqlDateTime dt;
+    TimeToStruct(TimeCurrent(), dt);
+    
+    // Check trading hours
+    if(dt.hour < StartHour || dt.hour >= EndHour) return false;
+    
+    // Avoid major news times (simplified)
+    if(AvoidNewsTime) {
+        // Avoid the first 30 minutes of major sessions
+        if((dt.hour == 8 || dt.hour == 13 || dt.hour == 21) && dt.min < 30) return false;
+    }
+    
+    return true;
+}
+
+//+------------------------------------------------------------------+
+//| Check Daily Loss Limit                                         |
+//+------------------------------------------------------------------+
+bool CheckDailyLossLimit()
+{
+    double currentBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+    double dailyLoss = accountStartBalance - currentBalance;
+    double maxLoss = accountStartBalance * (DailyMaxLoss / 100.0);
+    
+    if(dailyLoss >= maxLoss) {
+        Print("Daily loss limit reached: ", dailyLoss, " / ", maxLoss);
+        return true;
+    }
+    
+    return false;
+}
+
+//+------------------------------------------------------------------+
+//| Update Sentiment Analysis                                       |
+//+------------------------------------------------------------------+
+void UpdateSentimentAnalysis()
+{
+    if(!UseSentimentAnalysis) return;
+    
+    // Simplified sentiment based on price action and volume
+    double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+    static double lastPrice = 0;
+    
+    if(lastPrice == 0) lastPrice = currentPrice;
+    
+    double priceChange = (currentPrice - lastPrice) / lastPrice * 100;
+    sentimentScore = MathTanh(priceChange * 10); // Normalize between -1 and 1
+    
+    lastPrice = currentPrice;
+}
+
+//+------------------------------------------------------------------+
+//| Update Market Volatility                                       |
+//+------------------------------------------------------------------+
+void UpdateMarketVolatility()
+{
+    // Calculate ATR-based volatility
+    double high[], low[], close[];
+    ArraySetAsSeries(high, true);
+    ArraySetAsSeries(low, true);
+    ArraySetAsSeries(close, true);
+    
+    CopyHigh(_Symbol, TradingTimeframe, 0, 14, high);
+    CopyLow(_Symbol, TradingTimeframe, 0, 14, low);
+    CopyClose(_Symbol, TradingTimeframe, 0, 14, close);
+    
+    double tr = 0;
+    for(int i = 1; i < 14; i++) {
+        double tr1 = high[i] - low[i];
+        double tr2 = MathAbs(high[i] - close[i-1]);
+        double tr3 = MathAbs(low[i] - close[i-1]);
+        tr += MathMax(tr1, MathMax(tr2, tr3));
+    }
+    
+    marketVolatility = tr / 13.0;
+}
+
+//+------------------------------------------------------------------+
+//| Update Momentum Strength                                        |
+//+------------------------------------------------------------------+
+void UpdateMomentumStrength()
+{
+    if(ArraySize(ma_fast) < 2 || ArraySize(ma_slow) < 2) return;
+    
+    // Calculate momentum based on MA convergence/divergence
+    double ma_diff_current = ma_fast[0] - ma_slow[0];
+    double ma_diff_previous = ma_fast[1] - ma_slow[1];
+    
+    momentumStrength = ma_diff_current - ma_diff_previous;
+}
+
+//+------------------------------------------------------------------+
+//| Process Trading Signals                                         |
+//+------------------------------------------------------------------+
+void ProcessTradingSignals()
+{
+    // Check if we can open new trades
+    if(CountOpenPositions() >= MaxConcurrentTrades) return;
+    
+    // Check spread condition
+    double spread = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD) * SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+    if(spread > MaxSpreadPips * SymbolInfoDouble(_Symbol, SYMBOL_POINT)) return;
+    
+    // Get AI signal
+    int signal = GetAISignal();
+    
+    if(signal == 1) { // BUY signal
+        OpenTrade(ORDER_TYPE_BUY, "AI_SCALP_BUY");
+    }
+    else if(signal == -1) { // SELL signal
+        OpenTrade(ORDER_TYPE_SELL, "AI_SCALP_SELL");
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Get AI Signal                                                   |
+//+------------------------------------------------------------------+
+int GetAISignal()
+{
+    if(ArraySize(ma_fast) < MinBarsForEntry || ArraySize(ma_slow) < MinBarsForEntry || 
+       ArraySize(rsi) < MinBarsForEntry) return 0;
+    
+    // Neural network simulation
+    double inputs[8];
+    inputs[0] = (ma_fast[0] - ma_slow[0]) / SymbolInfoDouble(_Symbol, SYMBOL_POINT); // MA difference
+    inputs[1] = (rsi[0] - 50.0) / 50.0; // RSI normalized
+    inputs[2] = (stoch_main[0] - 50.0) / 50.0; // Stochastic normalized
+    inputs[3] = sentimentScore;
+    inputs[4] = marketVolatility / SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+    inputs[5] = momentumStrength / SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+    inputs[6] = (AggressivenessLevel - 5.0) / 5.0; // Aggressiveness normalized
+    inputs[7] = 1.0; // Bias
+    
+    // Simple neural network calculation
+    double activation = 0;
+    for(int i = 0; i < 8; i++) {
+        activation += inputs[i] * neuralWeights[i];
+    }
+    
+    // Apply sigmoid activation
+    double output = 1.0 / (1.0 + MathExp(-activation));
+    
+    // Decision thresholds based on aggressiveness
+    double buyThreshold = 0.5 + (10.0 - AggressivenessLevel) * 0.02;
+    double sellThreshold = 0.5 - (10.0 - AggressivenessLevel) * 0.02;
+    
+    if(output > buyThreshold) return 1;   // BUY
+    if(output < sellThreshold) return -1; // SELL
+    
+    return 0; // No signal
+}
+
+//+------------------------------------------------------------------+
+//| Open Trade                                                      |
+//+------------------------------------------------------------------+
+void OpenTrade(ENUM_ORDER_TYPE orderType, string strategy)
+{
+    double lotSize = CalculateLotSize();
+    if(lotSize <= 0) return;
+    
+    double price = (orderType == ORDER_TYPE_BUY) ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
+    double sl = 0, tp = 0;
+    
+    // Calculate SL and TP
+    double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+    int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
+    
+    if(orderType == ORDER_TYPE_BUY) {
+        sl = NormalizeDouble(price - StopLossPips * point * 10, digits);
+        tp = NormalizeDouble(price + TakeProfitPips * point * 10, digits);
+    } else {
+        sl = NormalizeDouble(price + StopLossPips * point * 10, digits);
+        tp = NormalizeDouble(price - TakeProfitPips * point * 10, digits);
+    }
+    
+    string comment = "NeoScalper_" + strategy + "_" + TimeToString(TimeCurrent(), TIME_SECONDS);
+    
+    if(trade.PositionOpen(_Symbol, orderType, lotSize, price, sl, tp, comment)) {
+        Print("Trade opened: ", EnumToString(orderType), " ", lotSize, " lots at ", price, " | Strategy: ", strategy);
+        stats.totalTrades++;
+    } else {
+        Print("Failed to open trade. Error: ", trade.ResultRetcode());
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Calculate Lot Size                                              |
+//+------------------------------------------------------------------+
+double CalculateLotSize()
+{
+    if(!UseAutoLotSizing) return LotSize;
+    
+    double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+    double riskAmount = balance * (RiskPerTrade / 100.0);
+    double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+    double stopLossPoints = StopLossPips * 10;
+    
+    double lotSize = riskAmount / (stopLossPoints * tickValue);
+    
+    // Normalize lot size
+    double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+    double maxLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+    double lotStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+    
+    lotSize = MathMax(minLot, MathMin(maxLot, MathRound(lotSize / lotStep) * lotStep));
+    
+    return lotSize;
+}
+
+//+------------------------------------------------------------------+
+//| Count Open Positions                                           |
+//+------------------------------------------------------------------+
+int CountOpenPositions()
+{
+    int count = 0;
+    for(int i = 0; i < PositionsTotal(); i++) {
+        if(position.SelectByIndex(i)) {
+            if(position.Symbol() == _Symbol && position.Magic() == magicNumber) {
+                count++;
+            }
+        }
+    }
+    return count;
+}
+
+//+------------------------------------------------------------------+
+//| Reset Daily Stats                                              |
+//+------------------------------------------------------------------+
+void ResetDailyStats()
+{
+    stats.dailyPnL = 0;
+    stats.totalTrades = 0;
+    stats.winningTrades = 0;
+    stats.losingTrades = 0;
+    stats.totalProfit = 0;
+    stats.totalLoss = 0;
+    stats.currentDrawdown = 0;
+    
+    startOfDay = TimeCurrent();
+    accountStartBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+}
+
+//+------------------------------------------------------------------+
+//| Update Dashboard                                               |
+//+------------------------------------------------------------------+
+void UpdateDashboard()
+{
+    // Calculate current stats
+    CalculateCurrentStats();
+    
+    string dashboard = "";
+    dashboard += "╔══════════════════════════════════════════════════════════════╗\n";
+    dashboard += "║                    NEO SCALPER X9 v4.2.1                    ║\n";
+    dashboard += "║              AI-Powered High Frequency Trading               ║\n";
+    dashboard += "╠══════════════════════════════════════════════════════════════╣\n";
+    dashboard += "║ STATUS: " + (IsTimeToTrade() ? "🟢 ACTIVE TRADING" : "🔴 OUTSIDE HOURS") + "                                  ║\n";
+    dashboard += "║ Symbol: " + _Symbol + " | Spread: " + DoubleToString(SymbolInfoInteger(_Symbol, SYMBOL_SPREAD), 1) + " pts" + "                        ║\n";
+    dashboard += "╠══════════════════════════════════════════════════════════════╣\n";
+    dashboard += "║ 📊 PERFORMANCE DASHBOARD                                     ║\n";
+    dashboard += "║ Today's P/L: " + (stats.dailyPnL >= 0 ? "🟢 +" : "🔴 ") + DoubleToString(stats.dailyPnL, 2) + " USD" + "                          ║\n";
+    dashboard += "║ Total Trades: " + IntegerToString(stats.totalTrades) + " | Open: " + IntegerToString(CountOpenPositions()) + "/" + IntegerToString(MaxConcurrentTrades) + "                     ║\n";
+    dashboard += "║ Win Rate: " + DoubleToString(GetWinRate(), 1) + "% | Profit Factor: " + DoubleToString(GetProfitFactor(), 2) + "                ║\n";
+    dashboard += "╠══════════════════════════════════════════════════════════════╣\n";
+    dashboard += "║ 🤖 AI ANALYSIS                                               ║\n";
+    dashboard += "║ Sentiment: " + DoubleToString(sentimentScore, 3) + " | Volatility: " + DoubleToString(marketVolatility * 100000, 1) + "           ║\n";
+    dashboard += "║ Momentum: " + DoubleToString(momentumStrength * 100000, 2) + " | Aggressiveness: " + DoubleToString(AggressivenessLevel, 0) + "/10" + "        ║\n";
+    dashboard += "╠══════════════════════════════════════════════════════════════╣\n";
+    dashboard += "║ 📈 TECHNICAL INDICATORS                                      ║\n";
+    if(ArraySize(ma_fast) > 0 && ArraySize(rsi) > 0) {
+        dashboard += "║ Fast MA: " + DoubleToString(ma_fast[0], 5) + " | Slow MA: " + DoubleToString(ma_slow[0], 5) + "        ║\n";
+        dashboard += "║ RSI: " + DoubleToString(rsi[0], 1) + " | Stoch: " + DoubleToString(stoch_main[0], 1) + "                             ║\n";
+    }
+    dashboard += "╠══════════════════════════════════════════════════════════════╣\n";
+    dashboard += "║ ⚙️ RISK MANAGEMENT                                           ║\n";
+    dashboard += "║ Risk/Trade: " + DoubleToString(RiskPerTrade, 1) + "% | Daily Max Loss: " + DoubleToString(DailyMaxLoss, 1) + "%         ║\n";
+    dashboard += "║ Account Balance: " + DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2) + " USD                   ║\n";
+    dashboard += "╠══════════════════════════════════════════════════════════════╣\n";
+    dashboard += "║ Last Update: " + TimeToString(TimeCurrent(), TIME_SECONDS) + "                         ║\n";
+    dashboard += "╚══════════════════════════════════════════════════════════════╝\n";
+    
+    Comment(dashboard);
+}
+
+//+------------------------------------------------------------------+
+//| Calculate Current Stats                                         |
+//+------------------------------------------------------------------+
+void CalculateCurrentStats()
+{
+    stats.dailyPnL = AccountInfoDouble(ACCOUNT_BALANCE) - accountStartBalance;
+    
+    // Count winning and losing trades from history
+    stats.winningTrades = 0;
+    stats.losingTrades = 0;
+    stats.totalProfit = 0;
+    stats.totalLoss = 0;
+    
+    datetime today = TimeCurrent() - (TimeCurrent() % 86400);
+    
+    HistorySelect(today, TimeCurrent());
+    for(int i = 0; i < HistoryDealsTotal(); i++) {
+        ulong ticket = HistoryDealGetTicket(i);
+        if(HistoryDealGetString(ticket, DEAL_SYMBOL) == _Symbol && 
+           HistoryDealGetInteger(ticket, DEAL_MAGIC) == magicNumber) {
+            double profit = HistoryDealGetDouble(ticket, DEAL_PROFIT);
+            if(profit > 0) {
+                stats.winningTrades++;
+                stats.totalProfit += profit;
+            } else if(profit < 0) {
+                stats.losingTrades++;
+                stats.totalLoss += MathAbs(profit);
+            }
+        }
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Get Win Rate                                                    |
+//+------------------------------------------------------------------+
+double GetWinRate()
+{
+    int totalTrades = stats.winningTrades + stats.losingTrades;
+    if(totalTrades == 0) return 0;
+    return (double)stats.winningTrades / totalTrades * 100.0;
+}
+
+//+------------------------------------------------------------------+
+//| Get Profit Factor                                              |
+//+------------------------------------------------------------------+
+double GetProfitFactor()
+{
+    if(stats.totalLoss == 0) return stats.totalProfit > 0 ? 999.0 : 0.0;
+    return stats.totalProfit / stats.totalLoss;
+}
+
+//+------------------------------------------------------------------+
+//| Print Final Stats                                              |
+//+------------------------------------------------------------------+
+void PrintFinalStats()
+{
+    Print("═══════════════════════════════════════");
+    Print("Neo Scalper X9 - Final Session Stats");
+    Print("═══════════════════════════════════════");
+    Print("Total Trades: ", stats.totalTrades);
+    Print("Winning Trades: ", stats.winningTrades);
+    Print("Losing Trades: ", stats.losingTrades);
+    Print("Win Rate: ", GetWinRate(), "%");
+    Print("Profit Factor: ", GetProfitFactor());
+    Print("Daily P/L: ", stats.dailyPnL, " USD");
+    Print("═══════════════════════════════════════");
+}
+
+//+------------------------------------------------------------------+
