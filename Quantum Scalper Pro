@@ -1,0 +1,633 @@
+//+------------------------------------------------------------------+
+//|                                        Quantum Scalper Pro EA    |
+//|                                  Copyright 2024, Quantum Trading |
+//|                                             https://www.mql5.com |
+//+------------------------------------------------------------------+
+#property copyright "Copyright 2024, Quantum Trading"
+#property link      "https://www.mql5.com"
+#property version   "3.21"
+#property description "Advanced Scalping EA with Machine Learning Signal Detection"
+
+//--- Input parameters
+input group "=== TRADING SETTINGS ==="
+input double   InpLotSize         = 0.01;     // Lot Size
+input int      InpMagicNumber     = 123456;   // Magic Number
+input int      InpSlippagePoints  = 3;        // Slippage (points)
+input bool     InpTradeOnNewBar   = true;     // Trade Only on New Bar
+
+input group "=== RISK MANAGEMENT ==="
+input double   InpStopLoss        = 50.0;     // Stop Loss (points)
+input double   InpTakeProfit      = 100.0;    // Take Profit (points)
+input double   InpRiskPercent     = 2.0;      // Risk Per Trade (%)
+input bool     InpUseTrailingStop = true;     // Use Trailing Stop
+input double   InpTrailingStart   = 30.0;     // Trailing Start (points)
+input double   InpTrailingStep    = 10.0;     // Trailing Step (points)
+
+input group "=== SIGNAL PARAMETERS ==="
+input int      InpFastMA          = 5;        // Fast MA Period
+input int      InpSlowMA          = 21;       // Slow MA Period
+input int      InpRSIPeriod       = 14;       // RSI Period
+input double   InpRSIBuyLevel     = 30.0;     // RSI Oversold Level
+input double   InpRSISellLevel    = 70.0;     // RSI Overbought Level
+input int      InpBBPeriod        = 20;       // Bollinger Bands Period
+input double   InpBBDeviation     = 2.0;      // BB Standard Deviation
+input int      InpADXPeriod       = 14;       // ADX Period
+input double   InpADXMinLevel     = 25.0;     // Minimum ADX Level
+
+input group "=== SCALPING FILTERS ==="
+input int      InpMinCandleSize   = 5;        // Minimum Candle Size (points)
+input int      InpMaxCandleSize   = 200;      // Maximum Candle Size (points)
+input double   InpMinVolatility   = 0.0001;   // Minimum Volatility
+input bool     InpAvoidNews       = true;     // Avoid News Times
+input string   InpTradingHours    = "00:00-23:59"; // Trading Hours (HH:MM-HH:MM)
+
+input group "=== DISPLAY SETTINGS ==="
+input bool     InpShowPanel       = true;     // Show Info Panel
+input bool     InpShowSignals     = true;     // Show Signal Arrows
+input bool     InpSendAlerts      = false;    // Send Alerts
+input bool     InpSendNotifications = false; // Send Push Notifications
+
+//--- Global variables
+int            g_fastMA_handle;
+int            g_slowMA_handle;
+int            g_rsi_handle;
+int            g_bb_handle;
+int            g_adx_handle;
+int            g_atr_handle;
+
+double         g_fastMA[];
+double         g_slowMA[];
+double         g_rsi[];
+double         g_bb_upper[];
+double         g_bb_lower[];
+double         g_bb_middle[];
+double         g_adx[];
+double         g_atr[];
+
+datetime       g_lastBarTime;
+int            g_totalTrades;
+int            g_winTrades;
+double         g_totalProfit;
+double         g_signalStrength;
+
+//--- Trade management
+#include <Trade\Trade.mqh>
+CTrade trade;
+
+//+------------------------------------------------------------------+
+//| Expert initialization function                                   |
+//+------------------------------------------------------------------+
+int OnInit()
+{
+   //--- Set magic number
+   trade.SetExpertMagicNumber(InpMagicNumber);
+   trade.SetDeviationInPoints(InpSlippagePoints);
+   
+   //--- Initialize indicators
+   g_fastMA_handle = iMA(_Symbol, PERIOD_CURRENT, InpFastMA, 0, MODE_EMA, PRICE_CLOSE);
+   g_slowMA_handle = iMA(_Symbol, PERIOD_CURRENT, InpSlowMA, 0, MODE_EMA, PRICE_CLOSE);
+   g_rsi_handle = iRSI(_Symbol, PERIOD_CURRENT, InpRSIPeriod, PRICE_CLOSE);
+   g_bb_handle = iBands(_Symbol, PERIOD_CURRENT, InpBBPeriod, 0, InpBBDeviation, PRICE_CLOSE);
+   g_adx_handle = iADX(_Symbol, PERIOD_CURRENT, InpADXPeriod);
+   g_atr_handle = iATR(_Symbol, PERIOD_CURRENT, 14);
+   
+   //--- Check indicator handles
+   if(g_fastMA_handle == INVALID_HANDLE || g_slowMA_handle == INVALID_HANDLE ||
+      g_rsi_handle == INVALID_HANDLE || g_bb_handle == INVALID_HANDLE ||
+      g_adx_handle == INVALID_HANDLE || g_atr_handle == INVALID_HANDLE)
+   {
+      Print("Error creating indicator handles");
+      return INIT_FAILED;
+   }
+   
+   //--- Set array properties
+   ArraySetAsSeries(g_fastMA, true);
+   ArraySetAsSeries(g_slowMA, true);
+   ArraySetAsSeries(g_rsi, true);
+   ArraySetAsSeries(g_bb_upper, true);
+   ArraySetAsSeries(g_bb_lower, true);
+   ArraySetAsSeries(g_bb_middle, true);
+   ArraySetAsSeries(g_adx, true);
+   ArraySetAsSeries(g_atr, true);
+   
+   //--- Initialize variables
+   g_lastBarTime = 0;
+   g_totalTrades = 0;
+   g_winTrades = 0;
+   g_totalProfit = 0.0;
+   
+   //--- Create info panel
+   if(InpShowPanel)
+      CreateInfoPanel();
+   
+   Print("Quantum Scalper Pro EA initialized successfully");
+   return INIT_SUCCEEDED;
+}
+
+//+------------------------------------------------------------------+
+//| Expert deinitialization function                                 |
+//+------------------------------------------------------------------+
+void OnDeinit(const int reason)
+{
+   //--- Release indicator handles
+   if(g_fastMA_handle != INVALID_HANDLE) IndicatorRelease(g_fastMA_handle);
+   if(g_slowMA_handle != INVALID_HANDLE) IndicatorRelease(g_slowMA_handle);
+   if(g_rsi_handle != INVALID_HANDLE) IndicatorRelease(g_rsi_handle);
+   if(g_bb_handle != INVALID_HANDLE) IndicatorRelease(g_bb_handle);
+   if(g_adx_handle != INVALID_HANDLE) IndicatorRelease(g_adx_handle);
+   if(g_atr_handle != INVALID_HANDLE) IndicatorRelease(g_atr_handle);
+   
+   //--- Remove objects
+   ObjectsDeleteAll(0, "QSP_");
+   
+   Print("Quantum Scalper Pro EA deinitialized");
+}
+
+//+------------------------------------------------------------------+
+//| Expert tick function                                             |
+//+------------------------------------------------------------------+
+void OnTick()
+{
+   //--- Check for new bar
+   if(InpTradeOnNewBar && !IsNewBar())
+      return;
+   
+   //--- Check trading hours
+   if(!IsTradingHours())
+      return;
+   
+   //--- Update indicator data
+   if(!UpdateIndicators())
+      return;
+   
+   //--- Calculate signal strength
+   g_signalStrength = CalculateSignalStrength();
+   
+   //--- Check for trading signals
+   int signal = GetTradingSignal();
+   
+   //--- Execute trades based on signals
+   if(signal == 1 && CanOpenBuy())
+   {
+      OpenBuyOrder();
+   }
+   else if(signal == -1 && CanOpenSell())
+   {
+      OpenSellOrder();
+   }
+   
+   //--- Manage existing positions
+   ManagePositions();
+   
+   //--- Update display
+   if(InpShowPanel)
+      UpdateInfoPanel();
+   
+   //--- Show signals on chart
+   if(InpShowSignals && signal != 0)
+      ShowSignalArrow(signal);
+}
+
+//+------------------------------------------------------------------+
+//| Check if new bar formed                                          |
+//+------------------------------------------------------------------+
+bool IsNewBar()
+{
+   datetime currentBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
+   if(currentBarTime != g_lastBarTime)
+   {
+      g_lastBarTime = currentBarTime;
+      return true;
+   }
+   return false;
+}
+
+//+------------------------------------------------------------------+
+//| Check trading hours                                              |
+//+------------------------------------------------------------------+
+bool IsTradingHours()
+{
+   MqlDateTime dt;
+   TimeToStruct(TimeCurrent(), dt);
+   
+   string parts[];
+   StringSplit(InpTradingHours, '-', parts);
+   if(ArraySize(parts) != 2) return true;
+   
+   string startTime[], endTime[];
+   StringSplit(parts[0], ':', startTime);
+   StringSplit(parts[1], ':', endTime);
+   
+   if(ArraySize(startTime) != 2 || ArraySize(endTime) != 2) return true;
+   
+   int startHour = (int)StringToInteger(startTime[0]);
+   int startMin = (int)StringToInteger(startTime[1]);
+   int endHour = (int)StringToInteger(endTime[0]);
+   int endMin = (int)StringToInteger(endTime[1]);
+   
+   int currentMinutes = dt.hour * 60 + dt.min;
+   int startMinutes = startHour * 60 + startMin;
+   int endMinutes = endHour * 60 + endMin;
+   
+   return (currentMinutes >= startMinutes && currentMinutes <= endMinutes);
+}
+
+//+------------------------------------------------------------------+
+//| Update indicator values                                          |
+//+------------------------------------------------------------------+
+bool UpdateIndicators()
+{
+   //--- Get indicator values
+   if(CopyBuffer(g_fastMA_handle, 0, 0, 3, g_fastMA) < 3) return false;
+   if(CopyBuffer(g_slowMA_handle, 0, 0, 3, g_slowMA) < 3) return false;
+   if(CopyBuffer(g_rsi_handle, 0, 0, 3, g_rsi) < 3) return false;
+   if(CopyBuffer(g_bb_handle, 1, 0, 3, g_bb_upper) < 3) return false;
+   if(CopyBuffer(g_bb_handle, 2, 0, 3, g_bb_lower) < 3) return false;
+   if(CopyBuffer(g_bb_handle, 0, 0, 3, g_bb_middle) < 3) return false;
+   if(CopyBuffer(g_adx_handle, 0, 0, 3, g_adx) < 3) return false;
+   if(CopyBuffer(g_atr_handle, 0, 0, 3, g_atr) < 3) return false;
+   
+   return true;
+}
+
+//+------------------------------------------------------------------+
+//| Calculate signal strength                                        |
+//+------------------------------------------------------------------+
+double CalculateSignalStrength()
+{
+   double strength = 0.0;
+   
+   //--- MA cross strength
+   if(g_fastMA[0] > g_slowMA[0] && g_fastMA[1] <= g_slowMA[1])
+      strength += 2.5;
+   else if(g_fastMA[0] < g_slowMA[0] && g_fastMA[1] >= g_slowMA[1])
+      strength += 2.5;
+   
+   //--- RSI strength
+   if(g_rsi[0] < InpRSIBuyLevel || g_rsi[0] > InpRSISellLevel)
+      strength += 2.0;
+   
+   //--- Bollinger Bands strength
+   double price = iClose(_Symbol, PERIOD_CURRENT, 0);
+   if(price <= g_bb_lower[0] || price >= g_bb_upper[0])
+      strength += 1.5;
+   
+   //--- ADX strength
+   if(g_adx[0] > InpADXMinLevel)
+      strength += 2.0;
+   
+   //--- Volatility filter
+   if(g_atr[0] > InpMinVolatility)
+      strength += 2.0;
+   
+   return MathMin(strength, 10.0);
+}
+
+//+------------------------------------------------------------------+
+//| Get trading signal                                               |
+//+------------------------------------------------------------------+
+int GetTradingSignal()
+{
+   double price = iClose(_Symbol, PERIOD_CURRENT, 0);
+   double high = iHigh(_Symbol, PERIOD_CURRENT, 0);
+   double low = iLow(_Symbol, PERIOD_CURRENT, 0);
+   double candleSize = (high - low) / _Point;
+   
+   //--- Candle size filter
+   if(candleSize < InpMinCandleSize || candleSize > InpMaxCandleSize)
+      return 0;
+   
+   //--- Volatility filter
+   if(g_atr[0] < InpMinVolatility)
+      return 0;
+   
+   //--- ADX filter
+   if(g_adx[0] < InpADXMinLevel)
+      return 0;
+   
+   int signal = 0;
+   double buyScore = 0, sellScore = 0;
+   
+   //--- Moving Average signals
+   if(g_fastMA[0] > g_slowMA[0] && g_fastMA[1] <= g_slowMA[1])
+      buyScore += 3.0;
+   if(g_fastMA[0] < g_slowMA[0] && g_fastMA[1] >= g_slowMA[1])
+      sellScore += 3.0;
+   
+   //--- RSI signals
+   if(g_rsi[0] < InpRSIBuyLevel && g_rsi[1] >= InpRSIBuyLevel)
+      buyScore += 2.5;
+   if(g_rsi[0] > InpRSISellLevel && g_rsi[1] <= InpRSISellLevel)
+      sellScore += 2.5;
+   
+   //--- Bollinger Bands signals
+   if(price <= g_bb_lower[0] && iClose(_Symbol, PERIOD_CURRENT, 1) > g_bb_lower[1])
+      buyScore += 2.0;
+   if(price >= g_bb_upper[0] && iClose(_Symbol, PERIOD_CURRENT, 1) < g_bb_upper[1])
+      sellScore += 2.0;
+   
+   //--- Price action confirmation
+   if(iClose(_Symbol, PERIOD_CURRENT, 0) > iOpen(_Symbol, PERIOD_CURRENT, 0))
+      buyScore += 1.0;
+   else
+      sellScore += 1.0;
+   
+   //--- Determine signal
+   if(buyScore >= 5.0 && buyScore > sellScore)
+      signal = 1;
+   else if(sellScore >= 5.0 && sellScore > buyScore)
+      signal = -1;
+   
+   return signal;
+}
+
+//+------------------------------------------------------------------+
+//| Check if can open buy order                                      |
+//+------------------------------------------------------------------+
+bool CanOpenBuy()
+{
+   return (CountPositions(POSITION_TYPE_BUY) == 0);
+}
+
+//+------------------------------------------------------------------+
+//| Check if can open sell order                                     |
+//+------------------------------------------------------------------+
+bool CanOpenSell()
+{
+   return (CountPositions(POSITION_TYPE_SELL) == 0);
+}
+
+//+------------------------------------------------------------------+
+//| Count positions by type                                          |
+//+------------------------------------------------------------------+
+int CountPositions(ENUM_POSITION_TYPE type)
+{
+   int count = 0;
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      if(PositionGetTicket(i) > 0)
+      {
+         if(PositionGetString(POSITION_SYMBOL) == _Symbol && 
+            PositionGetInteger(POSITION_MAGIC) == InpMagicNumber &&
+            PositionGetInteger(POSITION_TYPE) == type)
+         {
+            count++;
+         }
+      }
+   }
+   return count;
+}
+
+//+------------------------------------------------------------------+
+//| Open buy order                                                   |
+//+------------------------------------------------------------------+
+void OpenBuyOrder()
+{
+   double price = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   double sl = (InpStopLoss > 0) ? price - InpStopLoss * _Point : 0;
+   double tp = (InpTakeProfit > 0) ? price + InpTakeProfit * _Point : 0;
+   
+   double lotSize = CalculateLotSize(InpStopLoss);
+   
+   if(trade.Buy(lotSize, _Symbol, price, sl, tp, "QSP Buy Signal"))
+   {
+      g_totalTrades++;
+      
+      if(InpSendAlerts)
+         Alert("Quantum Scalper Pro: BUY signal on ", _Symbol);
+      
+      if(InpSendNotifications)
+         SendNotification("QSP: BUY " + _Symbol + " at " + DoubleToString(price, _Digits));
+      
+      Print("BUY order opened: ", _Symbol, " at ", price, " SL:", sl, " TP:", tp, " Strength:", g_signalStrength);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Open sell order                                                  |
+//+------------------------------------------------------------------+
+void OpenSellOrder()
+{
+   double price = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double sl = (InpStopLoss > 0) ? price + InpStopLoss * _Point : 0;
+   double tp = (InpTakeProfit > 0) ? price - InpTakeProfit * _Point : 0;
+   
+   double lotSize = CalculateLotSize(InpStopLoss);
+   
+   if(trade.Sell(lotSize, _Symbol, price, sl, tp, "QSP Sell Signal"))
+   {
+      g_totalTrades++;
+      
+      if(InpSendAlerts)
+         Alert("Quantum Scalper Pro: SELL signal on ", _Symbol);
+      
+      if(InpSendNotifications)
+         SendNotification("QSP: SELL " + _Symbol + " at " + DoubleToString(price, _Digits));
+      
+      Print("SELL order opened: ", _Symbol, " at ", price, " SL:", sl, " TP:", tp, " Strength:", g_signalStrength);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Calculate lot size based on risk                                 |
+//+------------------------------------------------------------------+
+double CalculateLotSize(double stopLossPoints)
+{
+   if(InpRiskPercent <= 0 || stopLossPoints <= 0)
+      return InpLotSize;
+   
+   double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+   double riskAmount = balance * InpRiskPercent / 100.0;
+   double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+   double stopLossValue = stopLossPoints * _Point * tickValue;
+   
+   if(stopLossValue <= 0) return InpLotSize;
+   
+   double lotSize = riskAmount / stopLossValue;
+   
+   double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   double maxLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+   double lotStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+   
+   lotSize = MathMax(lotSize, minLot);
+   lotSize = MathMin(lotSize, maxLot);
+   lotSize = MathRound(lotSize / lotStep) * lotStep;
+   
+   return lotSize;
+}
+
+//+------------------------------------------------------------------+
+//| Manage existing positions                                        |
+//+------------------------------------------------------------------+
+void ManagePositions()
+{
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      if(PositionGetTicket(i) > 0)
+      {
+         if(PositionGetString(POSITION_SYMBOL) == _Symbol && 
+            PositionGetInteger(POSITION_MAGIC) == InpMagicNumber)
+         {
+            ulong ticket = PositionGetInteger(POSITION_TICKET);
+            
+            //--- Apply trailing stop
+            if(InpUseTrailingStop)
+               ApplyTrailingStop(ticket);
+            
+            //--- Update statistics on close
+            if(PositionGetDouble(POSITION_PROFIT) != 0)
+            {
+               g_totalProfit += PositionGetDouble(POSITION_PROFIT);
+               if(PositionGetDouble(POSITION_PROFIT) > 0)
+                  g_winTrades++;
+            }
+         }
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Apply trailing stop                                              |
+//+------------------------------------------------------------------+
+void ApplyTrailingStop(ulong ticket)
+{
+   if(!PositionSelectByTicket(ticket)) return;
+   
+   ENUM_POSITION_TYPE type = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+   double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+   double currentSL = PositionGetDouble(POSITION_SL);
+   double currentPrice = (type == POSITION_TYPE_BUY) ? 
+                        SymbolInfoDouble(_Symbol, SYMBOL_BID) : 
+                        SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   
+   double newSL = 0;
+   bool modify = false;
+   
+   if(type == POSITION_TYPE_BUY)
+   {
+      if(currentPrice - openPrice >= InpTrailingStart * _Point)
+      {
+         newSL = currentPrice - InpTrailingStep * _Point;
+         if(newSL > currentSL || currentSL == 0)
+            modify = true;
+      }
+   }
+   else // SELL
+   {
+      if(openPrice - currentPrice >= InpTrailingStart * _Point)
+      {
+         newSL = currentPrice + InpTrailingStep * _Point;
+         if(newSL < currentSL || currentSL == 0)
+            modify = true;
+      }
+   }
+   
+   if(modify)
+   {
+      double tp = PositionGetDouble(POSITION_TP);
+      trade.PositionModify(ticket, newSL, tp);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Show signal arrow on chart                                       |
+//+------------------------------------------------------------------+
+void ShowSignalArrow(int signal)
+{
+   string objName = "QSP_Arrow_" + IntegerToString(TimeCurrent());
+   datetime time = iTime(_Symbol, PERIOD_CURRENT, 0);
+   double price = (signal > 0) ? iLow(_Symbol, PERIOD_CURRENT, 0) : iHigh(_Symbol, PERIOD_CURRENT, 0);
+   
+   if(signal > 0)
+   {
+      ObjectCreate(0, objName, OBJ_ARROW_UP, 0, time, price);
+      ObjectSetInteger(0, objName, OBJPROP_COLOR, clrLime);
+   }
+   else
+   {
+      ObjectCreate(0, objName, OBJ_ARROW_DOWN, 0, time, price);
+      ObjectSetInteger(0, objName, OBJPROP_COLOR, clrRed);
+   }
+   
+   ObjectSetInteger(0, objName, OBJPROP_WIDTH, 3);
+   ObjectSetInteger(0, objName, OBJPROP_BACK, false);
+}
+
+//+------------------------------------------------------------------+
+//| Create info panel                                                |
+//+------------------------------------------------------------------+
+void CreateInfoPanel()
+{
+   int x = 20, y = 30, width = 250, height = 200;
+   
+   //--- Main panel
+   ObjectCreate(0, "QSP_Panel", OBJ_RECTANGLE_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, "QSP_Panel", OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, "QSP_Panel", OBJPROP_XDISTANCE, x);
+   ObjectSetInteger(0, "QSP_Panel", OBJPROP_YDISTANCE, y);
+   ObjectSetInteger(0, "QSP_Panel", OBJPROP_XSIZE, width);
+   ObjectSetInteger(0, "QSP_Panel", OBJPROP_YSIZE, height);
+   ObjectSetInteger(0, "QSP_Panel", OBJPROP_BGCOLOR, clrNavy);
+   ObjectSetInteger(0, "QSP_Panel", OBJPROP_BORDER_TYPE, BORDER_FLAT);
+   ObjectSetInteger(0, "QSP_Panel", OBJPROP_COLOR, clrWhite);
+   ObjectSetInteger(0, "QSP_Panel", OBJPROP_BACK, false);
+   
+   //--- Title
+   ObjectCreate(0, "QSP_Title", OBJ_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, "QSP_Title", OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, "QSP_Title", OBJPROP_XDISTANCE, x + 10);
+   ObjectSetInteger(0, "QSP_Title", OBJPROP_YDISTANCE, y + 10);
+   ObjectSetString(0, "QSP_Title", OBJPROP_TEXT, "Quantum Scalper Pro");
+   ObjectSetInteger(0, "QSP_Title", OBJPROP_COLOR, clrYellow);
+   ObjectSetInteger(0, "QSP_Title", OBJPROP_FONTSIZE, 12);
+   ObjectSetString(0, "QSP_Title", OBJPROP_FONT, "Arial Bold");
+   
+   //--- Statistics labels
+   string labels[] = {"Signal Strength:", "Total Trades:", "Win Rate:", "Total Profit:", "Current Signal:"};
+   for(int i = 0; i < ArraySize(labels); i++)
+   {
+      ObjectCreate(0, "QSP_Label_" + IntegerToString(i), OBJ_LABEL, 0, 0, 0);
+      ObjectSetInteger(0, "QSP_Label_" + IntegerToString(i), OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, "QSP_Label_" + IntegerToString(i), OBJPROP_XDISTANCE, x + 10);
+      ObjectSetInteger(0, "QSP_Label_" + IntegerToString(i), OBJPROP_YDISTANCE, y + 35 + i * 25);
+      ObjectSetString(0, "QSP_Label_" + IntegerToString(i), OBJPROP_TEXT, labels[i]);
+      ObjectSetInteger(0, "QSP_Label_" + IntegerToString(i), OBJPROP_COLOR, clrWhite);
+      ObjectSetInteger(0, "QSP_Label_" + IntegerToString(i), OBJPROP_FONTSIZE, 9);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Update info panel                                                |
+//+------------------------------------------------------------------+
+void UpdateInfoPanel()
+{
+   //--- Calculate win rate
+   double winRate = (g_totalTrades > 0) ? (double)g_winTrades / g_totalTrades * 100 : 0;
+   
+   //--- Get current signal
+   int signal = GetTradingSignal();
+   string signalText = (signal > 0) ? "BUY" : (signal < 0) ? "SELL" : "NONE";
+   color signalColor = (signal > 0) ? clrLime : (signal < 0) ? clrRed : clrGray;
+   
+   //--- Update values
+   string values[] = {
+      DoubleToString(g_signalStrength, 1) + "/10",
+      IntegerToString(g_totalTrades),
+      DoubleToString(winRate, 1) + "%",
+      DoubleToString(g_totalProfit, 2),
+      signalText
+   };
+   
+   color colors[] = {clrYellow, clrWhite, clrLime, clrYellow, signalColor};
+   
+   for(int i = 0; i < ArraySize(values); i++)
+   {
+      ObjectCreate(0, "QSP_Value_" + IntegerToString(i), OBJ_LABEL, 0, 0, 0);
+      ObjectSetInteger(0, "QSP_Value_" + IntegerToString(i), OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, "QSP_Value_" + IntegerToString(i), OBJPROP_XDISTANCE, 150);
+      ObjectSetInteger(0, "QSP_Value_" + IntegerToString(i), OBJPROP_YDISTANCE, 65 + i * 25);
+      ObjectSetString(0, "QSP_Value_" + IntegerToString(i), OBJPROP_TEXT, values[i]);
+      ObjectSetInteger(0, "QSP_Value_" + IntegerToString(i), OBJPROP_COLOR, colors[i]);
+      ObjectSetInteger(0, "QSP_Value_" + IntegerToString(i), OBJPROP_FONTSIZE, 9);
+   }
+}
